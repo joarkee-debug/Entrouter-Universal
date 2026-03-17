@@ -3,8 +3,8 @@ name = "entrouter-universal"
 version = "0.2.0"
 edition = "2021"
 description = "Pipeline integrity guardian — what goes in, comes out identical."
-license = "AGPL-3.0-only"
-authors = ["John K"]
+license = "Apache-2.0"
+authors = ["John Aron Keeney"]
 
 [features]
 default = ["compression"]
