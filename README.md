@@ -20,6 +20,41 @@ cargo add entrouter-universal
 
 ---
 
+## CLI - Use It From The Shell
+
+```bash
+cargo install entrouter-universal
+```
+
+Now you have the `entrouter` command. No more shell escaping nightmares:
+
+```bash
+# Encode anything - JSON, tokens, whatever. Comes out as safe base64 + fingerprint.
+echo '{"tier":"enterprise","keyType":"engine"}' | entrouter encode
+# {"encoded":"eyJ0aWVy...","fingerprint":"3eeb58ed..."}
+
+# Verify it survived the trip
+echo '{"encoded":"...","fingerprint":"..."}' | entrouter verify
+# INTACT
+# Decoded: {"tier":"enterprise","keyType":"engine"}
+
+# Decode it back
+echo '{"encoded":"...","fingerprint":"..."}' | entrouter decode
+# {"tier":"enterprise","keyType":"engine"}
+
+# Raw mode - just base64, no JSON wrapper
+echo 'hello world' | entrouter raw-encode
+echo 'aGVsbG8gd29ybGQ=' | entrouter raw-decode
+```
+
+**SSH to a VPS? Pipe-friendly. No escaping issues.**
+```bash
+# Encode locally, send over SSH, decode on the other side
+echo '{"key":"value"}' | entrouter raw-encode | ssh root@your-vps "entrouter raw-decode"
+```
+
+---
+
 ## The Problem You've Been Living With
 
 ```
@@ -295,9 +330,15 @@ Format strings       ✅  %s%s%s%n%n%n
 Zero-width chars     ✅  ​‌‍
 ```
 
-**22 tests. Zero failures.**
+**28 tests. Zero failures.**
 
 ---
+
+## v0.4 - CLI
+
+- `entrouter` CLI binary — encode, decode, verify, raw-encode, raw-decode from the shell
+- Pipe-friendly, works over SSH, no shell escaping issues
+- `cargo install entrouter-universal` to get it
 
 ## v0.3 Improvements
 
