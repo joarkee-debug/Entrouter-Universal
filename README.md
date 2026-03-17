@@ -28,7 +28,7 @@ You're SSH'd into your VPS. You need to run a curl command with JSON. You know w
 <tr>
 <td width="50%">
 
-**Before — The escaping nightmare**
+**Before - The escaping nightmare**
 
 ```
 $ ssh root@your-vps
@@ -55,7 +55,7 @@ curl -d '{"key":"val"}' ...
 </td>
 <td width="50%">
 
-**After — One command**
+**After - One command**
 
 ```
 $ echo 'curl -s -X POST \
@@ -95,7 +95,7 @@ You type the command **exactly as you would locally**. Entrouter encodes it to s
 
 **Base64 at entry. SHA-256 fingerprint travels with it. Verify at exit.**
 
-Every layer between your keyboard and the destination — HTTP, JSON, Rust, Redis, Postgres, shell — sees a boring alphanumeric string. Nothing to escape. Nothing to mangle. Nothing to break.
+Every layer between your keyboard and the destination - HTTP, JSON, Rust, Redis, Postgres, shell - sees a boring alphanumeric string. Nothing to escape. Nothing to mangle. Nothing to break.
 
 ---
 
@@ -124,7 +124,7 @@ Six commands. All pipe-friendly. All SSH-safe.
 | `entrouter raw-encode` | Stdin → raw base64 (no JSON wrapper) |
 | `entrouter raw-decode` | Base64 → original (no JSON wrapper) |
 
-### SSH — The Killer Feature
+### SSH - The Killer Feature
 
 ```bash
 # Run ANY command on a remote server. Type it exactly how you would locally.
@@ -136,7 +136,7 @@ No quoting gymnastics. No backslash hell. No "it works locally but breaks over S
 ### Encode / Decode / Verify
 
 ```bash
-# Encode anything — comes out as base64 + SHA-256 fingerprint
+# Encode anything - comes out as base64 + SHA-256 fingerprint
 echo '{"tier":"enterprise","keyType":"engine"}' | entrouter encode
 # {"encoded":"eyJ0aWVy...","fingerprint":"3eeb58ed..."}
 
@@ -150,7 +150,7 @@ echo '{"encoded":"...","fingerprint":"..."}' | entrouter verify
 # Decoded: {"tier":"enterprise","keyType":"engine"}
 ```
 
-### Raw Mode — Pipe Anywhere
+### Raw Mode - Pipe Anywhere
 
 ```bash
 # Just base64. No JSON wrapper. Perfect for piping.
@@ -166,7 +166,7 @@ echo '{"key":"value"}' | entrouter raw-encode | ssh root@your-vps "entrouter raw
 
 ---
 
-## The Library — Five Tools
+## The Library - Five Tools
 
 Entrouter isn't just a CLI. It's a Rust crate with five integrity tools for your backend.
 
@@ -174,24 +174,24 @@ Entrouter isn't just a CLI. It's a Rust crate with five integrity tools for your
 use entrouter_universal::*;
 ```
 
-### 1. Envelope — Four Flavours
+### 1. Envelope - Four Flavours
 
 Wrap your data. Pass it through anything. Unwrap and verify on the other side.
 
 ```rust
-// Standard — works everywhere
+// Standard - works everywhere
 let env = Envelope::wrap(data);
 let original = env.unwrap_verified()?;
 
-// URL-Safe — uses - and _ instead of + and /
+// URL-Safe - uses - and _ instead of + and /
 let env = Envelope::wrap_url_safe(data);
 
-// Compressed — gzip first, then base64 (large payloads)
+// Compressed - gzip first, then base64 (large payloads)
 let env = Envelope::wrap_compressed(data)?;
 
-// TTL — self-expiring (race tokens, sessions, anything time-sensitive)
+// TTL - self-expiring (race tokens, sessions, anything time-sensitive)
 let env = Envelope::wrap_with_ttl(data, 300); // dies in 5 minutes
-env.unwrap_verified() // Err(Expired) after 5 min — cannot be replayed
+env.unwrap_verified() // Err(Expired) after 5 min - cannot be replayed
 ```
 
 Store it anywhere:
@@ -203,9 +203,9 @@ Response::json(env)                                                             
 
 ---
 
-### 2. Chain — Cryptographic Audit Trail
+### 2. Chain - Cryptographic Audit Trail
 
-Each link references the previous link's fingerprint. Tamper with any link — everything after it breaks. You know exactly where the chain was cut.
+Each link references the previous link's fingerprint. Tamper with any link - everything after it breaks. You know exactly where the chain was cut.
 
 ```rust
 let mut chain = Chain::new("race:listing_abc - OPENED");
@@ -228,11 +228,7 @@ Links: 5 | Valid: false
   Link 5: ❌ VIOLATED          ← cascade
 ```
 
-**Use case:** Legal proof of who won a race, in what order, with mathematical certainty. Download it. Verify it in court. Nobody argues with SHA-256.
-
----
-
-### 3. UniversalStruct — Per-Field Integrity
+### 3. UniversalStruct - Per-Field Integrity
 
 Not "something broke somewhere." You know **exactly which field** was tampered with.
 
@@ -258,7 +254,7 @@ Tamper detection:
 
 ---
 
-### 4. Guardian — Find The Exact Layer That Broke It
+### 4. Guardian - Find The Exact Layer That Broke It
 
 Checkpoint your data at every layer. Guardian tells you exactly which one corrupted it.
 
@@ -279,7 +275,7 @@ g.checkpoint("postgres_write",  &value_at_postgres);
   Layer 4: postgres_write - ❌ VIOLATED     ← cascade
 ```
 
-`g.assert_intact()` — panics with the layer name in your tests.
+`g.assert_intact()` - panics with the layer name in your tests.
 
 ---
 
@@ -307,7 +303,7 @@ let intact   = verify(&encoded, &fp)?;    // → bool
 | Postgres | `'`, `\`, null bytes | ✅ |
 | URLs | `+`, `/`, `=` (use `wrap_url_safe`) | ✅ |
 
-Every layer sees a boring alphanumeric string. Problem solved at the encoding level — not the escaping level.
+Every layer sees a boring alphanumeric string. Problem solved at the encoding level - not the escaping level.
 
 ---
 
@@ -332,7 +328,7 @@ Your Machine                         Your VPS
 SQL injection        ✅  '; DROP TABLE users; --
 JSON breaking        ✅  {"key":"val\"ue","nested":"b\\\\c"}
 Null bytes           ✅  \x00\x01\x02\x03
-Unicode hellscape    ✅  日本語 中文 한국어 العربية
+Unicode hellscape    ✅  �-�本語 中文 한국어 العربية
 Emoji overload       ✅  🔥💀🚀🎯⚡🖤
 XSS attempts         ✅  <script>alert('xss')</script>
 Redis protocol       ✅  *3\r\n$3\r\nSET\r\n
@@ -347,16 +343,16 @@ Zero-width chars     ✅  ​‌‍
 
 ## Changelog
 
-### v0.5 — SSH Command
-- `entrouter ssh <host>` — type the command, it runs on the remote machine. No escaping.
+### v0.5 - SSH Command
+- `entrouter ssh <host>` - type the command, it runs on the remote machine. No escaping.
 - Encodes locally, decodes on server, executes via `sh`. One step.
 
-### v0.4 — CLI
-- `entrouter` CLI binary — encode, decode, verify, raw-encode, raw-decode from the shell
+### v0.4 - CLI
+- `entrouter` CLI binary - encode, decode, verify, raw-encode, raw-decode from the shell
 - Pipe-friendly, works over SSH, no shell escaping issues
 - `cargo install entrouter-universal`
 
-### v0.3 — Hardening
+### v0.3 - Hardening
 - `#[must_use]` on all constructors and pure functions
 - `#[non_exhaustive]` on `UniversalError`
 - `Clone` and `PartialEq` on all error and result types - testable in assertions
