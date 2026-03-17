@@ -1,4 +1,5 @@
 use std::io::{self, Read};
+use std::process::Command;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -12,23 +13,39 @@ fn main() {
         eprintln!("  entrouter verify        Read JSON from stdin, verify integrity");
         eprintln!("  entrouter raw-encode    Read stdin, print just the base64 (no JSON)");
         eprintln!("  entrouter raw-decode    Read base64 from stdin, print original data");
+        eprintln!("  entrouter ssh <host>    Read a command from stdin, execute it on remote host");
         eprintln!();
         eprintln!("Pipe-friendly: echo 'hello' | entrouter encode | entrouter verify");
+        eprintln!("SSH example:   echo 'curl ...' | entrouter ssh root@your-vps");
         std::process::exit(1);
     }
 
-    let input = read_stdin();
-
     match args[1].as_str() {
-        "encode" => cmd_encode(&input),
-        "decode" => cmd_decode(&input),
-        "verify" => cmd_verify(&input),
-        "raw-encode" => cmd_raw_encode(&input),
-        "raw-decode" => cmd_raw_decode(&input),
-        other => {
-            eprintln!("Unknown command: {other}");
-            eprintln!("Try: encode, decode, verify, raw-encode, raw-decode");
-            std::process::exit(1);
+        "ssh" => {
+            if args.len() < 3 {
+                eprintln!("Usage: entrouter ssh <user@host>");
+                eprintln!("  Reads the command to run from stdin.");
+                eprintln!("  Example: echo 'curl -s http://localhost:3000/health' | entrouter ssh root@your-vps");
+                std::process::exit(1);
+            }
+            let host = &args[2];
+            let input = read_stdin();
+            cmd_ssh(host, &input);
+        }
+        cmd => {
+            let input = read_stdin();
+            match cmd {
+                "encode" => cmd_encode(&input),
+                "decode" => cmd_decode(&input),
+                "verify" => cmd_verify(&input),
+                "raw-encode" => cmd_raw_encode(&input),
+                "raw-decode" => cmd_raw_decode(&input),
+                other => {
+                    eprintln!("Unknown command: {other}");
+                    eprintln!("Try: encode, decode, verify, raw-encode, raw-decode, ssh");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
@@ -132,5 +149,33 @@ fn cmd_raw_decode(input: &str) {
             eprintln!("Decode failed: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// ssh: encode a command locally, send it over SSH, decode and execute on remote
+fn cmd_ssh(host: &str, command: &str) {
+    let encoded = entrouter_universal::encode_str(command);
+
+    // The remote side decodes the base64 and pipes it into sh
+    // The base64 string is shell-safe — no quotes, braces, or special chars
+    let remote_cmd = format!(
+        "echo '{}' | entrouter raw-decode | sh",
+        encoded
+    );
+
+    let status = Command::new("ssh")
+        .arg(host)
+        .arg(&remote_cmd)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to run ssh: {e}");
+            std::process::exit(1);
+        });
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
     }
 }

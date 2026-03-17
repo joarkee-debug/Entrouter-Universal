@@ -29,7 +29,16 @@ cargo install entrouter-universal
 Now you have the `entrouter` command. No more shell escaping nightmares:
 
 ```bash
-# Encode anything - JSON, tokens, whatever. Comes out as safe base64 + fingerprint.
+# Run ANY command on a remote server — no escaping needed. Ever.
+echo 'curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer er_xxx" -d '{"tier":"enterprise","keyType":"engine"}' http://127.0.0.1:3000/admin/keys/generate' | entrouter ssh root@your-vps
+# Just works. JSON arrives intact. Output comes back clean.
+```
+
+The `ssh` subcommand encodes your command locally, sends the safe base64 over SSH,
+decodes on the server, and executes it. You type the command exactly as you would locally.
+
+```bash
+# Encode anything — JSON, tokens, whatever. Comes out as safe base64 + fingerprint.
 echo '{"tier":"enterprise","keyType":"engine"}' | entrouter encode
 # {"encoded":"eyJ0aWVy...","fingerprint":"3eeb58ed..."}
 
@@ -42,7 +51,7 @@ echo '{"encoded":"...","fingerprint":"..."}' | entrouter verify
 echo '{"encoded":"...","fingerprint":"..."}' | entrouter decode
 # {"tier":"enterprise","keyType":"engine"}
 
-# Raw mode - just base64, no JSON wrapper
+# Raw mode — just base64, no JSON wrapper
 echo 'hello world' | entrouter raw-encode
 echo 'aGVsbG8gd29ybGQ=' | entrouter raw-decode
 ```
@@ -333,6 +342,11 @@ Zero-width chars     ✅  ​‌‍
 **28 tests. Zero failures.**
 
 ---
+
+## v0.5 - SSH Command
+
+- `entrouter ssh <host>` — type the command, it runs on the remote machine. No escaping.
+- Encodes locally, decodes on server, executes via `sh`. One step.
 
 ## v0.4 - CLI
 
