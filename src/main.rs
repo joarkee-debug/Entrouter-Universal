@@ -229,7 +229,7 @@ fn cmd_ssh(host: &str, command: &str) {
     let encoded = entrouter_universal::encode_str(command);
 
     // The remote side decodes the base64 and pipes it into sh
-    // The base64 string is shell-safe — no quotes, braces, or special chars
+    // The base64 string is shell-safe -- no quotes, braces, or special chars
     let remote_cmd = format!("echo '{}' | entrouter raw-decode | sh", encoded);
 
     let status = Command::new("ssh")

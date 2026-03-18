@@ -366,7 +366,7 @@ fn suite_signed_envelope() {
     assert_eq!(NIGHTMARE, restored.unwrap_verified(key).unwrap());
     println!("✅ JSON round-trip: signed envelope survived serialization");
 
-    // Tamper detection — modify the data after signing
+    // Tamper detection -- modify the data after signing
     let mut env_tamper = SignedEnvelope::wrap("original", key);
     env_tamper.d = entrouter_universal::encode_str("tampered");
     assert!(env_tamper.unwrap_verified(key).is_err());
@@ -396,7 +396,7 @@ fn suite_chain_diff_merge() {
     assert_eq!(diff.diverges_at, None);
     println!("✅ Identical chains: common=3, no divergence");
 
-    // Prefix chain — B is longer
+    // Prefix chain -- B is longer
     let mut b_longer = Chain::from_json(&a_json).unwrap();
     b_longer.append("link 4");
     b_longer.append("link 5");
@@ -408,13 +408,13 @@ fn suite_chain_diff_merge() {
     assert_eq!(diff2.diverges_at, None);
     println!("✅ Prefix chain: A(3) is prefix of B(5)");
 
-    // Merge prefix — should return the longer
+    // Merge prefix -- should return the longer
     let merged = Chain::merge(&a, &b_longer).unwrap();
     assert_eq!(merged.len(), 5);
     assert!(merged.verify().valid);
     println!("✅ Merge prefix: returned longer chain (5 links), valid");
 
-    // Divergent chains — both extend differently
+    // Divergent chains -- both extend differently
     let mut c = Chain::new("different genesis");
     c.append("link 2 alt");
     let diff3 = Chain::diff(&a, &c);
@@ -425,7 +425,7 @@ fn suite_chain_diff_merge() {
         diff3.diverges_at.unwrap()
     );
 
-    // Merge divergent — should error
+    // Merge divergent -- should error
     let merge_err = Chain::merge(&a, &c);
     assert!(merge_err.is_err());
     println!("✅ Merge divergent: correctly rejected");

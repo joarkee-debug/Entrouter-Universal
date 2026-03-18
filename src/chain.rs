@@ -276,7 +276,7 @@ impl Chain {
                 diverges_at: pos,
             });
         }
-        // One is a prefix — return the longer one
+        // One is a prefix -- return the longer one
         if a.links.len() >= b.links.len() {
             Ok(a.clone())
         } else {

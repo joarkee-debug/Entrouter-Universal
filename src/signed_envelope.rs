@@ -144,10 +144,10 @@ impl SignedEnvelope {
 
     /// Verify HMAC signature, then decode and verify integrity.
     pub fn unwrap_verified(&self, key: &str) -> Result<String, UniversalError> {
-        // HMAC check first — reject before decoding
+        // HMAC check first -- reject before decoding
         if !hmac_verify(&self.f, key, &self.sig) {
             return Err(UniversalError::MalformedEnvelope(
-                "HMAC signature invalid — wrong key or tampered envelope".into(),
+                "HMAC signature invalid -- wrong key or tampered envelope".into(),
             ));
         }
 
