@@ -1,60 +1,39 @@
 use serde_json::{json, Value};
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
 /// Run the MCP stdio server.
-/// Reads JSON-RPC messages (Content-Length framed) from stdin,
+/// Reads JSON-RPC messages (newline-delimited JSON) from stdin,
 /// writes responses to stdout.
 pub fn run() {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut reader = stdin.lock();
+    let reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    while let Some(content_length) = read_content_length(&mut reader) {
-        let mut body = vec![0u8; content_length];
-        if reader.read_exact(&mut body).is_err() {
-            break;
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
         }
 
-        let body_str = match String::from_utf8(body) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let request: Value = match serde_json::from_str(&body_str) {
+        let request: Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => continue,
         };
 
         if let Some(response) = handle_request(&request) {
-            write_message(&mut writer, &response);
+            write_response(&mut writer, &response);
         }
     }
 }
 
-fn read_content_length(reader: &mut impl BufRead) -> Option<usize> {
-    let mut content_length = None;
-    loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => return None,
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    return content_length;
-                }
-                if let Some(value) = trimmed.strip_prefix("Content-Length: ") {
-                    content_length = value.parse().ok();
-                }
-            }
-            Err(_) => return None,
-        }
-    }
-}
-
-fn write_message(writer: &mut impl Write, message: &Value) {
+fn write_response(writer: &mut impl Write, message: &Value) {
     let body = serde_json::to_string(message).unwrap();
-    let _ = write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body);
+    let _ = writeln!(writer, "{}", body);
     let _ = writer.flush();
 }
 
