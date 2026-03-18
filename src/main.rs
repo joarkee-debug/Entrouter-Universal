@@ -1,4 +1,4 @@
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::process::Command;
 
 mod mcp;
@@ -44,12 +44,16 @@ fn main() {
             "  entrouter multi-ssh <h1,h2>    Encode + execute command on multiple hosts via SSH"
         );
         eprintln!(
+            "  entrouter scp <f> <h:path>     Transfer a local file to a remote host via SSH"
+        );
+        eprintln!(
             "  entrouter mcp                  Start MCP server for VS Code Copilot integration"
         );
         eprintln!();
         eprintln!("Pipe-friendly: echo 'hello' | entrouter encode | entrouter verify");
         eprintln!("SSH example:   echo 'curl ...' | entrouter ssh root@your-vps");
         eprintln!("Multi-SSH:     echo 'uptime' | entrouter multi-ssh root@h1,root@h2");
+        eprintln!("SCP:           entrouter scp config.json root@vps:/etc/app/config.json");
         eprintln!("Docker:        echo 'nginx -t' | entrouter docker my-nginx");
         eprintln!("Cron:          echo 'backup.sh' | entrouter cron '0 2 * * *'");
         std::process::exit(1);
@@ -78,6 +82,17 @@ fn main() {
             let hosts = &args[2];
             let input = read_stdin();
             cmd_multi_ssh(hosts, &input);
+        }
+        "scp" => {
+            if args.len() < 4 {
+                eprintln!("Usage: entrouter scp <local-file> <user@host>:<remote-path>");
+                eprintln!("  Transfers a local file to a remote host via SSH.");
+                eprintln!("  Example: entrouter scp config.json root@your-vps:/etc/myapp/config.json");
+                std::process::exit(1);
+            }
+            let local_file = &args[2];
+            let dest = &args[3];
+            cmd_scp(local_file, dest);
         }
         "docker" => {
             if args.len() < 3 {
@@ -128,7 +143,7 @@ fn main() {
                 "exec" => cmd_exec(&input),
                 other => {
                     eprintln!("Unknown command: {other}");
-                    eprintln!("Try: encode, decode, verify, raw-encode, raw-decode, ssh, multi-ssh, docker, kube, cron, exec");
+                    eprintln!("Try: encode, decode, verify, raw-encode, raw-decode, ssh, multi-ssh, scp, docker, kube, cron, exec");
                     std::process::exit(1);
                 }
             }
@@ -298,6 +313,64 @@ fn cmd_multi_ssh(hosts_str: &str, command: &str) {
 
     if any_failed {
         std::process::exit(1);
+    }
+}
+
+/// scp: transfer a local file to a remote host via SSH
+/// Reads the file as bytes, base64-encodes it, pipes through SSH to
+/// `entrouter raw-decode` on the remote side which writes the file.
+fn cmd_scp(local_file: &str, dest: &str) {
+    let (host, remote_path) = match dest.split_once(':') {
+        Some((h, p)) if !h.is_empty() && !p.is_empty() => (h, p),
+        _ => {
+            eprintln!("Invalid destination. Use: user@host:/remote/path");
+            std::process::exit(1);
+        }
+    };
+
+    let content = std::fs::read(local_file).unwrap_or_else(|e| {
+        eprintln!("Failed to read '{}': {}", local_file, e);
+        std::process::exit(1);
+    });
+
+    let encoded = entrouter_universal::encode(&content);
+    let escaped_path = format!("'{}'", remote_path.replace('\'', "'\\''"));
+    let remote_cmd = format!("entrouter raw-decode > {}", escaped_path);
+
+    let mut child = Command::new("ssh")
+        .args(ssh_args())
+        .arg(host)
+        .arg(&remote_cmd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to run ssh: {e}");
+            std::process::exit(1);
+        });
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(encoded.as_bytes()).unwrap_or_else(|e| {
+            eprintln!("Failed to write to ssh stdin: {e}");
+            std::process::exit(1);
+        });
+    }
+
+    let status = child.wait().unwrap_or_else(|e| {
+        eprintln!("Failed to wait on ssh: {e}");
+        std::process::exit(1);
+    });
+
+    if status.success() {
+        eprintln!(
+            "Transferred {} bytes to {}:{}",
+            content.len(),
+            host,
+            remote_path
+        );
+    } else {
+        std::process::exit(status.code().unwrap_or(1));
     }
 }
 

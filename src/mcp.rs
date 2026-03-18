@@ -443,6 +443,46 @@ fn tools_list() -> Vec<Value> {
                 "required": ["chain_a_json", "chain_b_json"]
             }
         }),
+        json!({
+            "name": "entrouter_scp",
+            "description": "Upload file content to a remote host via SSH. Base64-encodes the content locally, pipes it through SSH, and decodes it on the remote side using entrouter. No escaping issues -- binary-safe. Requires entrouter installed on the remote host.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "SSH destination (e.g. root@your-vps)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The file content to write on the remote host"
+                    },
+                    "remote_path": {
+                        "type": "string",
+                        "description": "Absolute path on the remote host to write the file to"
+                    }
+                },
+                "required": ["host", "content", "remote_path"]
+            }
+        }),
+        json!({
+            "name": "entrouter_scp_down",
+            "description": "Download a file from a remote host via SSH. Reads the file on the remote side, base64-encodes it with entrouter, transfers it back, and decodes it locally. Returns the file content as text. Requires entrouter installed on the remote host.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "SSH destination (e.g. root@your-vps)"
+                    },
+                    "remote_path": {
+                        "type": "string",
+                        "description": "Absolute path of the file to download from the remote host"
+                    }
+                },
+                "required": ["host", "remote_path"]
+            }
+        }),
     ]
 }
 
@@ -997,6 +1037,147 @@ fn call_tool(name: &str, args: &Value) -> Value {
                     })
                 }
                 Err(e) => tool_error(&format!("Merge failed: {e}")),
+            }
+        }
+        "entrouter_scp" => {
+            let host = args["host"].as_str().unwrap_or("");
+            let content = args["content"].as_str().unwrap_or("");
+            let remote_path = args["remote_path"].as_str().unwrap_or("");
+            if host.is_empty() || content.is_empty() || remote_path.is_empty() {
+                return tool_error("'host', 'content', and 'remote_path' are all required");
+            }
+            let encoded = entrouter_universal::encode_str(content);
+            let escaped_path = format!("'{}'", remote_path.replace('\'', "'\\''"));
+            let remote_cmd = format!("entrouter raw-decode > {}", escaped_path);
+
+            match std::process::Command::new("ssh")
+                .args(ssh_args())
+                .arg(host)
+                .arg(&remote_cmd)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    // Write base64-encoded content to SSH stdin, then close the pipe
+                    if let Some(mut stdin) = child.stdin.take() {
+                        use std::io::Write as _;
+                        let _ = stdin.write_all(encoded.as_bytes());
+                    }
+                    let timeout = std::time::Duration::from_secs(120);
+                    let start = std::time::Instant::now();
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                let mut stderr_out = String::new();
+                                if let Some(mut err) = child.stderr.take() {
+                                    use std::io::Read;
+                                    let _ = err.read_to_string(&mut stderr_out);
+                                }
+                                if status.success() {
+                                    break json!({
+                                        "content": [{
+                                            "type": "text",
+                                            "text": format!("Transferred {} bytes to {}:{}", content.len(), host, remote_path)
+                                        }]
+                                    });
+                                } else {
+                                    let msg = if stderr_out.is_empty() {
+                                        format!("SCP failed with exit code {}", status.code().unwrap_or(-1))
+                                    } else {
+                                        format!("SCP failed: {}", stderr_out.trim())
+                                    };
+                                    break tool_error(&msg);
+                                }
+                            }
+                            Ok(None) => {
+                                if start.elapsed() > timeout {
+                                    let _ = child.kill();
+                                    break tool_error("SCP upload timed out after 120 seconds");
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                break tool_error(&format!("Failed to wait on SSH process: {e}"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => tool_error(&format!("SSH failed: {e}")),
+            }
+        }
+        "entrouter_scp_down" => {
+            let host = args["host"].as_str().unwrap_or("");
+            let remote_path = args["remote_path"].as_str().unwrap_or("");
+            if host.is_empty() || remote_path.is_empty() {
+                return tool_error("Both 'host' and 'remote_path' are required");
+            }
+            let escaped_path = format!("'{}'", remote_path.replace('\'', "'\\''"));
+            let remote_cmd = format!("cat {} | entrouter raw-encode", escaped_path);
+
+            match std::process::Command::new("ssh")
+                .args(ssh_args())
+                .arg(host)
+                .arg(&remote_cmd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    let timeout = std::time::Duration::from_secs(120);
+                    let start = std::time::Instant::now();
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                let mut stdout = String::new();
+                                let mut stderr_out = String::new();
+                                if let Some(mut out) = child.stdout.take() {
+                                    use std::io::Read;
+                                    let _ = out.read_to_string(&mut stdout);
+                                }
+                                if let Some(mut err) = child.stderr.take() {
+                                    use std::io::Read;
+                                    let _ = err.read_to_string(&mut stderr_out);
+                                }
+                                if !status.success() {
+                                    let msg = if stderr_out.is_empty() {
+                                        format!("SCP download failed with exit code {}", status.code().unwrap_or(-1))
+                                    } else {
+                                        format!("SCP download failed: {}", stderr_out.trim())
+                                    };
+                                    break tool_error(&msg);
+                                }
+                                // Decode the base64 output
+                                let trimmed = stdout.trim();
+                                match entrouter_universal::decode(trimmed) {
+                                    Ok(bytes) => {
+                                        break json!({
+                                            "content": [{
+                                                "type": "text",
+                                                "text": String::from_utf8_lossy(&bytes)
+                                            }]
+                                        });
+                                    }
+                                    Err(e) => {
+                                        break tool_error(&format!("Failed to decode remote file content: {e}"));
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                if start.elapsed() > timeout {
+                                    let _ = child.kill();
+                                    break tool_error("SCP download timed out after 120 seconds");
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                break tool_error(&format!("Failed to wait on SSH process: {e}"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => tool_error(&format!("SSH failed: {e}")),
             }
         }
         _ => tool_error(&format!("Unknown tool: {name}")),

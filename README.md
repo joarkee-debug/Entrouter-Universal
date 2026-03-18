@@ -113,7 +113,7 @@ cargo add entrouter-universal
 
 ## CLI Commands
 
-Eleven commands. All pipe-friendly. All shell-safe.
+Twelve commands. All pipe-friendly. All shell-safe.
 
 | Command | What it does |
 |---|---|
@@ -128,13 +128,14 @@ Eleven commands. All pipe-friendly. All shell-safe.
 | `entrouter verify` | JSON with encoded + fingerprint -> INTACT or TAMPERED |
 | `entrouter raw-encode` | Stdin -> raw base64 (no JSON wrapper) |
 | `entrouter raw-decode` | Base64 -> original (no JSON wrapper) |
+| `entrouter scp <f> <h:path>` | Transfer a local file to a remote host via SSH. Binary-safe. |
 | `entrouter mcp` | Start the MCP server (for AI agents in VS Code, Cursor, etc.) |
 
 ---
 
 ## MCP Server - AI Agent Integration
 
-Entrouter ships with a built-in [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with **21 tools**. This lets AI agents like GitHub Copilot, Claude, or any MCP-compatible client use entrouter's tools directly -- encoding, decoding, fingerprinting, integrity checks, HMAC-signed envelopes, cryptographic audit chains, and **running commands on remote servers, Docker containers, Kubernetes pods, or multiple hosts in parallel** without any shell escaping issues.
+Entrouter ships with a built-in [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with **23 tools**. This lets AI agents like GitHub Copilot, Claude, or any MCP-compatible client use entrouter's tools directly -- encoding, decoding, fingerprinting, integrity checks, HMAC-signed envelopes, cryptographic audit chains, and **running commands on remote servers, Docker containers, Kubernetes pods, or multiple hosts in parallel** without any shell escaping issues.
 
 ### Setup (2 minutes)
 
@@ -233,6 +234,8 @@ That's it. Restart VS Code and the tools are available to your AI agent.
 | `entrouter_multi_ssh` | Run a command on multiple hosts in parallel -- collect all results |
 | `entrouter_docker` | Run a command inside a Docker container -- no `docker exec` escaping |
 | `entrouter_kube` | Run a command inside a Kubernetes pod -- no `kubectl exec` escaping |
+| `entrouter_scp` | Upload file content to a remote host via SSH -- binary-safe |
+| `entrouter_scp_down` | Download a file from a remote host via SSH -- returns content as text |
 
 ### SSH Tool Requirements
 
@@ -248,6 +251,22 @@ Once set up, your AI agent can do things like:
 - Run database queries, deploy code, debug production -- anything you'd type in a terminal
 
 All commands are base64-encoded locally, sent over SSH, decoded on the remote, and executed. No escaping. 30-second timeout prevents hangs.
+
+---
+
+### SCP - File Transfer Over SSH
+
+```bash
+# Upload a local file to a remote server. Binary-safe.
+entrouter scp config.json root@your-vps:/etc/app/config.json
+
+# Any file type works -- binary, text, JSON, whatever.
+entrouter scp backup.tar.gz root@your-vps:/tmp/backup.tar.gz
+```
+
+Reads the file locally, base64-encodes it, pipes it through SSH stdin, decodes on the remote side with `entrouter raw-decode`. No size limits from shell argument length. No escaping. Binary-safe.
+
+Requires entrouter installed on the remote host.
 
 ---
 
@@ -576,6 +595,14 @@ Zero-width chars     ✅  ​‌‍
 ---
 
 ## Changelog
+
+### v0.9 - SCP File Transfer
+- `entrouter scp <local-file> <user@host>:<remote-path>` -- upload files to remote hosts via SSH. Binary-safe.
+- MCP `entrouter_scp` -- upload file content to a remote host (AI agents pass content directly)
+- MCP `entrouter_scp_down` -- download a file from a remote host, returns content as text
+- Base64-encoded through SSH stdin, decoded with `entrouter raw-decode` on remote. No shell argument length limits.
+- 120-second timeout for large file transfers
+- 12 CLI commands, 23 MCP tools
 
 ### v0.8 - Signed Envelopes, Chain Diff/Merge, Multi-Host & Container Execution
 - `SignedEnvelope` -- HMAC-SHA256 authenticated envelopes (all 4 modes: standard, url-safe, compressed, TTL)
