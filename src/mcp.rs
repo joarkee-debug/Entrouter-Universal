@@ -39,6 +39,75 @@ fn ssh_args() -> Vec<String> {
     args
 }
 
+/// Run a child process with timeout, reading stdout/stderr concurrently
+/// to avoid pipe-buffer deadlocks.
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout_secs: u64,
+) -> Result<(std::process::ExitStatus, String, String), String> {
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(mut out) = stdout_handle {
+            use std::io::Read;
+            let _ = out.read_to_string(&mut buf);
+        }
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(mut err) = stderr_handle {
+            use std::io::Read;
+            let _ = err.read_to_string(&mut buf);
+        }
+        buf
+    });
+
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    return Err(format!("timed out after {timeout_secs} seconds"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("failed to wait on process: {e}")),
+        }
+    };
+
+    let stdout = stdout_thread.join().unwrap_or_default();
+    let stderr = stderr_thread.join().unwrap_or_default();
+    Ok((status, stdout, stderr))
+}
+
+/// Format stdout + stderr into a single result string.
+fn format_output(stdout: &str, stderr: &str, status: &std::process::ExitStatus) -> String {
+    let mut result = String::new();
+    if !stdout.is_empty() {
+        result.push_str(stdout);
+    }
+    if !stderr.is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str("[stderr] ");
+        result.push_str(stderr);
+    }
+    if result.is_empty() {
+        result = format!(
+            "Command completed with exit code {}",
+            status.code().unwrap_or(-1)
+        );
+    }
+    result
+}
+
 /// Run the MCP stdio server.
 /// Reads JSON-RPC messages (newline-delimited JSON) from stdin,
 /// writes responses to stdout.
@@ -589,60 +658,16 @@ fn call_tool(name: &str, args: &Value) -> Value {
                 .stderr(std::process::Stdio::piped())
                 .spawn()
             {
-                Ok(mut child) => {
-                    let timeout = std::time::Duration::from_secs(30);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                let mut stdout = String::new();
-                                let mut stderr = String::new();
-                                if let Some(mut out) = child.stdout.take() {
-                                    use std::io::Read;
-                                    let _ = out.read_to_string(&mut stdout);
-                                }
-                                if let Some(mut err) = child.stderr.take() {
-                                    use std::io::Read;
-                                    let _ = err.read_to_string(&mut stderr);
-                                }
-                                let mut result = String::new();
-                                if !stdout.is_empty() {
-                                    result.push_str(&stdout);
-                                }
-                                if !stderr.is_empty() {
-                                    if !result.is_empty() {
-                                        result.push('\n');
-                                    }
-                                    result.push_str("[stderr] ");
-                                    result.push_str(&stderr);
-                                }
-                                if result.is_empty() {
-                                    result = format!(
-                                        "Command completed with exit code {}",
-                                        status.code().unwrap_or(-1)
-                                    );
-                                }
-                                break json!({
-                                    "content": [{
-                                        "type": "text",
-                                        "text": result
-                                    }],
-                                    "isError": !status.success()
-                                });
-                            }
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    break tool_error("SSH command timed out after 30 seconds");
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(e) => {
-                                break tool_error(&format!("Failed to wait on SSH process: {e}"));
-                            }
-                        }
+                Ok(child) => match wait_with_timeout(child, 30) {
+                    Ok((status, stdout, stderr)) => {
+                        let result = format_output(&stdout, &stderr, &status);
+                        json!({
+                            "content": [{"type": "text", "text": result}],
+                            "isError": !status.success()
+                        })
                     }
-                }
+                    Err(e) => tool_error(&format!("SSH command {e}")),
+                },
                 Err(e) => tool_error(&format!("SSH failed: {e}")),
             }
         }
@@ -748,62 +773,16 @@ fn call_tool(name: &str, args: &Value) -> Value {
                 .stderr(std::process::Stdio::piped())
                 .spawn()
             {
-                Ok(mut child) => {
-                    let timeout = std::time::Duration::from_secs(30);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                let mut stdout = String::new();
-                                let mut stderr = String::new();
-                                if let Some(mut out) = child.stdout.take() {
-                                    use std::io::Read;
-                                    let _ = out.read_to_string(&mut stdout);
-                                }
-                                if let Some(mut err) = child.stderr.take() {
-                                    use std::io::Read;
-                                    let _ = err.read_to_string(&mut stderr);
-                                }
-                                let mut result = String::new();
-                                if !stdout.is_empty() {
-                                    result.push_str(&stdout);
-                                }
-                                if !stderr.is_empty() {
-                                    if !result.is_empty() {
-                                        result.push('\n');
-                                    }
-                                    result.push_str("[stderr] ");
-                                    result.push_str(&stderr);
-                                }
-                                if result.is_empty() {
-                                    result = format!(
-                                        "Command completed with exit code {}",
-                                        status.code().unwrap_or(-1)
-                                    );
-                                }
-                                break json!({
-                                    "content": [{
-                                        "type": "text",
-                                        "text": result
-                                    }],
-                                    "isError": !status.success()
-                                });
-                            }
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    break tool_error("Docker exec timed out after 30 seconds");
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(e) => {
-                                break tool_error(&format!(
-                                    "Failed to wait on docker process: {e}"
-                                ));
-                            }
-                        }
+                Ok(child) => match wait_with_timeout(child, 30) {
+                    Ok((status, stdout, stderr)) => {
+                        let result = format_output(&stdout, &stderr, &status);
+                        json!({
+                            "content": [{"type": "text", "text": result}],
+                            "isError": !status.success()
+                        })
                     }
-                }
+                    Err(e) => tool_error(&format!("Docker exec {e}")),
+                },
                 Err(e) => tool_error(&format!("Docker exec failed: {e}")),
             }
         }
@@ -831,62 +810,16 @@ fn call_tool(name: &str, args: &Value) -> Value {
                 .stderr(std::process::Stdio::piped())
                 .spawn()
             {
-                Ok(mut child) => {
-                    let timeout = std::time::Duration::from_secs(30);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                let mut stdout = String::new();
-                                let mut stderr = String::new();
-                                if let Some(mut out) = child.stdout.take() {
-                                    use std::io::Read;
-                                    let _ = out.read_to_string(&mut stdout);
-                                }
-                                if let Some(mut err) = child.stderr.take() {
-                                    use std::io::Read;
-                                    let _ = err.read_to_string(&mut stderr);
-                                }
-                                let mut result = String::new();
-                                if !stdout.is_empty() {
-                                    result.push_str(&stdout);
-                                }
-                                if !stderr.is_empty() {
-                                    if !result.is_empty() {
-                                        result.push('\n');
-                                    }
-                                    result.push_str("[stderr] ");
-                                    result.push_str(&stderr);
-                                }
-                                if result.is_empty() {
-                                    result = format!(
-                                        "Command completed with exit code {}",
-                                        status.code().unwrap_or(-1)
-                                    );
-                                }
-                                break json!({
-                                    "content": [{
-                                        "type": "text",
-                                        "text": result
-                                    }],
-                                    "isError": !status.success()
-                                });
-                            }
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    break tool_error("kubectl exec timed out after 30 seconds");
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(e) => {
-                                break tool_error(&format!(
-                                    "Failed to wait on kubectl process: {e}"
-                                ));
-                            }
-                        }
+                Ok(child) => match wait_with_timeout(child, 30) {
+                    Ok((status, stdout, stderr)) => {
+                        let result = format_output(&stdout, &stderr, &status);
+                        json!({
+                            "content": [{"type": "text", "text": result}],
+                            "isError": !status.success()
+                        })
                     }
-                }
+                    Err(e) => tool_error(&format!("kubectl exec {e}")),
+                },
                 Err(e) => tool_error(&format!("kubectl exec failed: {e}")),
             }
         }
@@ -910,49 +843,10 @@ fn call_tool(name: &str, args: &Value) -> Value {
                     .stderr(std::process::Stdio::piped())
                     .spawn()
                 {
-                    Ok(mut child) => {
-                        let timeout = std::time::Duration::from_secs(30);
-                        let start = std::time::Instant::now();
-                        loop {
-                            match child.try_wait() {
-                                Ok(Some(status)) => {
-                                    let mut stdout = String::new();
-                                    let mut stderr = String::new();
-                                    if let Some(mut out) = child.stdout.take() {
-                                        use std::io::Read;
-                                        let _ = out.read_to_string(&mut stdout);
-                                    }
-                                    if let Some(mut err) = child.stderr.take() {
-                                        use std::io::Read;
-                                        let _ = err.read_to_string(&mut stderr);
-                                    }
-                                    let mut output = String::new();
-                                    if !stdout.is_empty() {
-                                        output.push_str(&stdout);
-                                    }
-                                    if !stderr.is_empty() {
-                                        if !output.is_empty() {
-                                            output.push('\n');
-                                        }
-                                        output.push_str("[stderr] ");
-                                        output.push_str(&stderr);
-                                    }
-                                    if output.is_empty() {
-                                        output = format!("exit {}", status.code().unwrap_or(-1));
-                                    }
-                                    break output;
-                                }
-                                Ok(None) => {
-                                    if start.elapsed() > timeout {
-                                        let _ = child.kill();
-                                        break "TIMEOUT after 30s".to_string();
-                                    }
-                                    std::thread::sleep(std::time::Duration::from_millis(100));
-                                }
-                                Err(e) => break format!("ERROR: {e}"),
-                            }
-                        }
-                    }
+                    Ok(child) => match wait_with_timeout(child, 30) {
+                        Ok((status, stdout, stderr)) => format_output(&stdout, &stderr, &status),
+                        Err(e) => e,
+                    },
                     Err(e) => format!("SSH failed: {e}"),
                 };
                 results.push(format!("[{host}]\n{result}"));
@@ -1075,51 +969,32 @@ fn call_tool(name: &str, args: &Value) -> Value {
                 .spawn()
             {
                 Ok(mut child) => {
-                    // Write base64-encoded content to SSH stdin, then close the pipe
                     if let Some(mut stdin) = child.stdin.take() {
                         use std::io::Write as _;
                         let _ = stdin.write_all(encoded.as_bytes());
                     }
-                    let timeout = std::time::Duration::from_secs(120);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                let mut stderr_out = String::new();
-                                if let Some(mut err) = child.stderr.take() {
-                                    use std::io::Read;
-                                    let _ = err.read_to_string(&mut stderr_out);
-                                }
-                                if status.success() {
-                                    break json!({
-                                        "content": [{
-                                            "type": "text",
-                                            "text": format!("Transferred {} bytes to {}:{}", content.len(), host, remote_path)
-                                        }]
-                                    });
+                    match wait_with_timeout(child, 120) {
+                        Ok((status, _stdout, stderr)) => {
+                            if status.success() {
+                                json!({
+                                    "content": [{
+                                        "type": "text",
+                                        "text": format!("Transferred {} bytes to {}:{}", content.len(), host, remote_path)
+                                    }]
+                                })
+                            } else {
+                                let msg = if stderr.is_empty() {
+                                    format!(
+                                        "SCP failed with exit code {}",
+                                        status.code().unwrap_or(-1)
+                                    )
                                 } else {
-                                    let msg = if stderr_out.is_empty() {
-                                        format!(
-                                            "SCP failed with exit code {}",
-                                            status.code().unwrap_or(-1)
-                                        )
-                                    } else {
-                                        format!("SCP failed: {}", stderr_out.trim())
-                                    };
-                                    break tool_error(&msg);
-                                }
-                            }
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    break tool_error("SCP upload timed out after 120 seconds");
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(e) => {
-                                break tool_error(&format!("Failed to wait on SSH process: {e}"));
+                                    format!("SCP failed: {}", stderr.trim())
+                                };
+                                tool_error(&msg)
                             }
                         }
+                        Err(e) => tool_error(&format!("SCP upload {e}")),
                     }
                 }
                 Err(e) => tool_error(&format!("SSH failed: {e}")),
@@ -1142,64 +1017,34 @@ fn call_tool(name: &str, args: &Value) -> Value {
                 .stderr(std::process::Stdio::piped())
                 .spawn()
             {
-                Ok(mut child) => {
-                    let timeout = std::time::Duration::from_secs(120);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                let mut stdout = String::new();
-                                let mut stderr_out = String::new();
-                                if let Some(mut out) = child.stdout.take() {
-                                    use std::io::Read;
-                                    let _ = out.read_to_string(&mut stdout);
-                                }
-                                if let Some(mut err) = child.stderr.take() {
-                                    use std::io::Read;
-                                    let _ = err.read_to_string(&mut stderr_out);
-                                }
-                                if !status.success() {
-                                    let msg = if stderr_out.is_empty() {
-                                        format!(
-                                            "SCP download failed with exit code {}",
-                                            status.code().unwrap_or(-1)
-                                        )
-                                    } else {
-                                        format!("SCP download failed: {}", stderr_out.trim())
-                                    };
-                                    break tool_error(&msg);
-                                }
-                                // Decode the base64 output
-                                let trimmed = stdout.trim();
-                                match entrouter_universal::decode(trimmed) {
-                                    Ok(bytes) => {
-                                        break json!({
-                                            "content": [{
-                                                "type": "text",
-                                                "text": String::from_utf8_lossy(&bytes)
-                                            }]
-                                        });
-                                    }
-                                    Err(e) => {
-                                        break tool_error(&format!(
-                                            "Failed to decode remote file content: {e}"
-                                        ));
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    break tool_error("SCP download timed out after 120 seconds");
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
+                Ok(child) => match wait_with_timeout(child, 120) {
+                    Ok((status, stdout, stderr)) => {
+                        if !status.success() {
+                            let msg = if stderr.is_empty() {
+                                format!(
+                                    "SCP download failed with exit code {}",
+                                    status.code().unwrap_or(-1)
+                                )
+                            } else {
+                                format!("SCP download failed: {}", stderr.trim())
+                            };
+                            return tool_error(&msg);
+                        }
+                        let trimmed = stdout.trim();
+                        match entrouter_universal::decode(trimmed) {
+                            Ok(bytes) => json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": String::from_utf8_lossy(&bytes)
+                                }]
+                            }),
                             Err(e) => {
-                                break tool_error(&format!("Failed to wait on SSH process: {e}"));
+                                tool_error(&format!("Failed to decode remote file content: {e}"))
                             }
                         }
                     }
-                }
+                    Err(e) => tool_error(&format!("SCP download {e}")),
+                },
                 Err(e) => tool_error(&format!("SSH failed: {e}")),
             }
         }
