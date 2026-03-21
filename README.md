@@ -59,19 +59,20 @@ curl -d '{"key":"val"}' ...
 **After - One command**
 
 ```
-$ echo 'curl -s -X POST \
+$ entrouter ssh root@your-vps <<'CMD'
+curl -s -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer er_xxx" \
-  -d {"tier":"enterprise"} \
-  http://127.0.0.1:3000/admin/keys/generate' \
-  | entrouter ssh root@your-vps
+  -d '{"tier":"enterprise"}' \
+  http://127.0.0.1:3000/admin/keys/generate
+CMD
 
 {"apiKey":"er_ent_9f3a...","tier":"enterprise"}
 
 # Done. First try. Every time.
 
 
-  
+
 ```
 
 </td>
@@ -114,7 +115,7 @@ cargo add entrouter-universal
 
 ## CLI Commands
 
-Twelve commands. All pipe-friendly. All shell-safe.
+All pipe-friendly. All shell-safe.
 
 | Command | What it does |
 |---|---|
@@ -136,47 +137,32 @@ Twelve commands. All pipe-friendly. All shell-safe.
 
 ## MCP Server - AI Agent Integration
 
-Entrouter ships with a built-in [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with **23 tools**. This lets AI agents like GitHub Copilot, Claude, or any MCP-compatible client use entrouter's tools directly -- encoding, decoding, fingerprinting, integrity checks, HMAC-signed envelopes, cryptographic audit chains, and **running commands on remote servers, Docker containers, Kubernetes pods, or multiple hosts in parallel** without any shell escaping issues.
+Give your AI agent the ability to run commands on servers, Docker containers, and Kubernetes pods -- with zero escaping issues. Here's what that looks like in practice:
 
-### Setup (2 minutes)
+```
+You:     "Check if my VPS is healthy"
+Copilot: runs `curl -s http://localhost:3000/health` on root@your-vps
+Result:  {"status":"ok","uptime":"14d 3h 22m"}
 
-**1. Install entrouter**
+You:     "Restart the API and show me the last 10 log lines"
+Copilot: runs `systemctl restart api && journalctl -u api --no-pager -n 10` on root@your-vps
+Result:  [full service log output -- no escaping, no manual SSH]
+```
+
+Your AI agent handles the SSH, encoding, and execution automatically. You just describe what you want in plain English.
+
+Entrouter's built-in [MCP server](https://modelcontextprotocol.io/) exposes **23 tools** to any MCP-compatible client (GitHub Copilot, Claude, Cursor, etc.) -- encoding, decoding, integrity checks, signed envelopes, audit chains, and remote execution.
+
+### Setup (2 steps)
+
+**Step 1.** Install entrouter:
 
 ```bash
 cargo install entrouter-universal
 ```
 
-**2. Add to VS Code**
+**Step 2.** Create `.vscode/mcp.json` in your project root:
 
-Open your VS Code settings JSON and add:
-
-<table>
-<tr>
-<td width="50%">
-
-**Global** (all workspaces)
-
-Edit `settings.json` → add:
-```json
-{
-  "mcp": {
-    "servers": {
-      "entrouter": {
-        "type": "stdio",
-        "command": "entrouter",
-        "args": ["mcp"]
-      }
-    }
-  }
-}
-```
-
-</td>
-<td width="50%">
-
-**Per-workspace**
-
-Create `.vscode/mcp.json`:
 ```json
 {
   "servers": {
@@ -189,11 +175,9 @@ Create `.vscode/mcp.json`:
 }
 ```
 
-</td>
-</tr>
-</table>
+Restart VS Code. Your AI agent now has access to all 23 tools.
 
-That's it. Restart VS Code and the tools are available to your AI agent.
+> **Want it in every workspace?** Add the same config inside an `"mcp"` key in your VS Code `settings.json` instead.
 
 ### Available MCP Tools
 
@@ -201,11 +185,11 @@ That's it. Restart VS Code and the tools are available to your AI agent.
 
 | Tool | What it does |
 |---|---|
-| `entrouter_encode` | Encode text → base64 + SHA-256 fingerprint (JSON output) |
+| `entrouter_encode` | Encode text to base64 + SHA-256 fingerprint (JSON output) |
 | `entrouter_decode` | Decode base64 back to original text |
 | `entrouter_verify` | Check data integrity -- INTACT or TAMPERED |
-| `entrouter_raw_encode` | Encode text → plain base64 (no wrapper) |
-| `entrouter_raw_decode` | Decode plain base64 → original text |
+| `entrouter_raw_encode` | Encode text to plain base64 (no wrapper) |
+| `entrouter_raw_decode` | Decode plain base64 to original text |
 | `entrouter_fingerprint` | Compute SHA-256 fingerprint of any text |
 
 **Envelopes**
@@ -288,11 +272,19 @@ Same encoding, same zero-escaping -- just comma-separate the hosts. Results retu
 ### SSH - The Killer Feature
 
 ```bash
-# Run ANY command on a remote server. Type it exactly how you would locally.
-echo 'curl -s -X POST -H "Content-Type: application/json" -d {"key":"value"} http://localhost:3000/api' | entrouter ssh root@your-vps
+# Simple commands - just pipe them in
+echo 'systemctl status nginx' | entrouter ssh root@your-vps
+
+# Complex commands with JSON - use a heredoc
+entrouter ssh root@your-vps <<'CMD'
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"key":"value"}' \
+  http://localhost:3000/api
+CMD
 ```
 
-No quoting gymnastics. No backslash hell. No "it works locally but breaks over SSH." Just pipe your command and go.
+No quoting gymnastics. No backslash hell. No "it works locally but breaks over SSH." Pipe simple commands with `echo`, use a heredoc for anything complex.
 
 ### Docker - Same Pain, Same Fix
 
@@ -300,8 +292,10 @@ No quoting gymnastics. No backslash hell. No "it works locally but breaks over S
 # Run ANY command inside a container. No docker exec escaping hell.
 echo 'nginx -t && nginx -s reload' | entrouter docker my-nginx
 
-# Complex JSON, special chars - doesn't matter
-echo 'curl -X POST -d {"config":"new_value"} http://localhost:8080/api' | entrouter docker my-app
+# Complex JSON - use a heredoc
+entrouter docker my-app <<'CMD'
+curl -X POST -d '{"config":"new_value"}' http://localhost:8080/api
+CMD
 ```
 
 Uses `base64 -d` on the container side - zero dependencies. Works with any image.
@@ -381,9 +375,9 @@ echo '{"key":"value"}' | entrouter raw-encode | ssh root@your-vps "entrouter raw
 
 ---
 
-## The Library - Six Tools
+## The Library
 
-Entrouter isn't just a CLI. It's a Rust crate with six integrity tools for your backend.
+Entrouter isn't just a CLI. It's a Rust crate you can use directly in your backend.
 
 ```rust
 use entrouter_universal::*;
@@ -473,7 +467,7 @@ let diff = Chain::diff(&chain_a, &chain_b);
 
 // Merge two chains (one must be a prefix of the other)
 let merged = Chain::merge(&chain_a, &chain_b)?; // returns the longer chain
-// If they diverge → Err(ChainMergeConflict { diverges_at: 4 })
+// If they diverge: Err(ChainMergeConflict { diverges_at: 4 })
 ```
 
 ### 3. UniversalStruct - Per-Field Integrity
@@ -527,21 +521,15 @@ g.checkpoint("postgres_write",  &value_at_postgres);
 
 ---
 
-### 5. Signed Envelope (HMAC-SHA256)
-
-See [1b. Signed Envelope](#1b-signed-envelope---hmac-authentication) above.
-
----
-
-### 6. Core Primitives
+### 5. Core Primitives
 
 ```rust
 use entrouter_universal::{encode_str, decode_str, fingerprint_str, verify};
 
-let encoded  = encode_str(data);          // → base64
-let original = decode_str(&encoded)?;     // → original
-let fp       = fingerprint_str(data);     // → SHA-256 hex
-let intact   = verify(&encoded, &fp)?;    // → bool
+let encoded  = encode_str(data);          // base64
+let original = decode_str(&encoded)?;     // original
+let fp       = fingerprint_str(data);     // SHA-256 hex
+let intact   = verify(&encoded, &fp)?;    // bool
 ```
 
 ---
@@ -596,6 +584,23 @@ Zero-width chars     ✅  ​‌‍
 ---
 
 ## Changelog
+
+### v0.9.6 - MCP Stdin Isolation
+- Fixed child processes (SSH, docker, kubectl) inheriting the JSON-RPC stdin pipe
+- Concurrent tool calls now work reliably -- no more timeouts from stdin contention
+
+### v0.9.5 - Concurrent MCP Tool Calls
+- MCP `tools/call` requests now dispatch to separate threads
+- Multiple AI tool calls can run in parallel without blocking each other
+- Thread-safe stdout via `Arc<Mutex<Stdout>>`
+
+### v0.9.4 - Pipe Deadlock Fix
+- Fixed pipe deadlock in all process-spawning MCP handlers
+- Reader threads for stdout/stderr now run concurrently with process polling
+
+### v0.9.3 - Windows ControlMaster Fix
+- SSH ControlMaster flags now only apply on non-Windows platforms
+- Fixes connection failures on Windows where ControlMaster is not supported
 
 ### v0.9 - SCP File Transfer
 - `entrouter scp <local-file> <user@host>:<remote-path>` -- upload files to remote hosts via SSH. Binary-safe.
